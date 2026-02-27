@@ -11,8 +11,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 
 from rag.models import RetrievalRequest, RetrievalResponse
-from rag.query_service import LocalHybridRetrievalService
-from rag.vector_store import DEFAULT_COLLECTION_NAME
+from rag.retrieval.query_service import LocalHybridRetrievalService
+from rag.indexing.vector_store import DEFAULT_COLLECTION_NAME
 
 app = FastAPI(title="Impiricus Course Retrieval API", version="0.1.0")
 

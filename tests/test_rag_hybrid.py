@@ -1,6 +1,6 @@
-from rag.hybrid_retriever import reciprocal_rank_fusion
-from rag.sparse_index import SparseHit
-from rag.vector_store import DenseHit
+from rag.retrieval.hybrid_retriever import reciprocal_rank_fusion
+from rag.retrieval.sparse_index import SparseHit
+from rag.indexing.vector_store import DenseHit
 
 
 def test_reciprocal_rank_fusion_combines_dense_and_sparse() -> None:

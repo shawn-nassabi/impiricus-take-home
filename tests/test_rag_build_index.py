@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from rag import build_index
+from rag.indexing import build_index
 
 
 class _FakeSparseIndex:

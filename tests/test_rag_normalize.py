@@ -1,4 +1,4 @@
-from rag.normalize import normalize_records
+from rag.indexing.normalize import normalize_records
 
 
 def test_normalize_records_maps_bulletin_to_cab_compatible_shape() -> None:

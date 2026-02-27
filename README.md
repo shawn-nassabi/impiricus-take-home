@@ -37,19 +37,55 @@ Key output:
 
 ## RAG Index Build
 
-Build local dense+sparse retrieval indices:
+This project uses a local vector database (Chroma) plus a local BM25 index for hybrid retrieval.
+
+### Initial Vector DB Setup
+
+For a fresh clone, the first-time setup flow is:
+
+1. Install dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+2. Make sure the source course JSON files exist:
+   - `data/cab_courses.json`
+   - `data/bulletin_courses.json`
+
+These are already included in this repository. If you need to regenerate them, run the CAB and bulletin ETL steps above first.
+
+3. Build the local retrieval artifacts (this is the initial vector DB setup):
+
+```bash
+python3 -m rag.build_index --persist-dir data --rebuild true --log-level INFO
+```
+
+This command will:
+- normalize CAB + bulletin data into one canonical corpus
+- write `data/rag_corpus.jsonl`
+- build the local sparse BM25 index in `data/sparse_index/`
+- build and persist the local Chroma vector DB in `data/chroma/`
+
+After that first build, the local vector DB is ready for API queries.
+
+### Incremental Build Commands
+
+Build local dense+sparse retrieval indices if artifacts are missing:
 
 ```bash
 python3 -m rag.build_index --persist-dir data
 ```
 
-Verbose progress logs:
+Build with verbose progress logs:
 
 ```bash
 python3 -m rag.build_index --persist-dir data --log-level INFO
 ```
 
-Rebuild indices (clears old artifacts first):
+Force a clean rebuild (recommended after changing source data):
 
 ```bash
 python3 -m rag.build_index --persist-dir data --rebuild true

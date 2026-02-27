@@ -36,44 +36,47 @@ These files are produced by the ETL pipelines in `etl/`.
    - sparse BM25 keyword search,
    - then fuse the two ranked lists with RRF.
 
-## Core Files
+## Package Layout
 
 - `rag/models.py`
   - Shared data models for canonical documents and retrieval request/response types.
 
-- `rag/normalize.py`
+- `rag/indexing/normalize.py`
   - Loads JSON input.
   - Converts CAB + bulletin rows into the same canonical schema.
   - Builds the exact text that is embedded and searched.
   - Writes / reads the canonical JSONL corpus.
 
-- `rag/embeddings.py`
+- `rag/indexing/embeddings.py`
   - Loads the embedding backend.
   - Default model is `mixedbread-ai/mxbai-embed-large-v1`.
   - Can be overridden with `--embedding-model` or `RAG_EMBEDDING_MODEL`.
 
-- `rag/vector_store.py`
+- `rag/indexing/vector_store.py`
   - Wraps local Chroma usage.
   - Creates / resets / loads the Chroma collection.
   - Embeds batches and upserts them into Chroma.
   - Performs dense retrieval.
 
-- `rag/sparse_index.py`
+- `rag/retrieval/sparse_index.py`
   - Builds a BM25 index from the same canonical text used for embedding.
   - Saves the document payloads used to reconstruct the sparse index.
   - Performs sparse retrieval.
 
-- `rag/hybrid_retriever.py`
+- `rag/retrieval/hybrid_retriever.py`
   - Runs dense + sparse retrieval.
   - Applies filters.
   - Combines results with Reciprocal Rank Fusion.
 
-- `rag/query_service.py`
+- `rag/retrieval/query_service.py`
   - Loads persisted indices.
   - Exposes a `LocalHybridRetrievalService` that the API can call.
 
 - `rag/build_index.py`
-  - CLI entrypoint for building or rebuilding the local retrieval artifacts.
+  - Compatibility wrapper so `python3 -m rag.build_index` continues to work.
+
+- `rag/indexing/build_index.py`
+  - Actual CLI implementation for building or rebuilding the local retrieval artifacts.
   - Also emits progress logs during the build.
 
 ## Canonical Document Shape
@@ -107,7 +110,7 @@ This keeps a single schema for indexing while preserving the source in metadata.
 
 This is the most important part for understanding retrieval quality.
 
-Every indexed document gets a single canonical text string built in `rag/normalize.py` by `_canonical_text(...)`.
+Every indexed document gets a single canonical text string built in `rag/indexing/normalize.py` by `_canonical_text(...)`.
 
 The text is composed as newline-separated labeled fields:
 
