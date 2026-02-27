@@ -1,3 +1,6 @@
+import json
+import time
+
 import pytest
 
 try:
@@ -6,42 +9,104 @@ except Exception as exc:
     pytest.skip(f"fastapi test dependencies unavailable: {exc}", allow_module_level=True)
 
 import app as api
-from rag.models import RetrievalHit, RetrievalRequest, RetrievalResponse
+from chatbot_agent.models import EvaluateResponse, RetrievedCourseSummary
+from chatbot_agent.service import PreparedChatQuery
 
 
-class _FakeService:
-    def search(self, request: RetrievalRequest) -> RetrievalResponse:
-        return RetrievalResponse(
-            query=request.query,
-            hits=[
-                RetrievalHit(
-                    doc_id="cab:CSCI 0111:abc",
-                    score=0.9,
-                    dense_rank=1,
-                    sparse_rank=2,
-                    source="cab",
+class _FakeChatbotService:
+    def prepare_query(self, query: str, department: str | None = None) -> PreparedChatQuery:
+        return PreparedChatQuery(
+            started_at=time.perf_counter(),
+            query=query,
+            department=department,
+            retrieved_courses=[
+                RetrievedCourseSummary(
                     course_code="CSCI 0111",
                     title="Computing Foundations",
-                    metadata={"source": "cab", "course_code": "CSCI 0111", "title": "Computing Foundations"},
-                    text="Course code: CSCI 0111\nTitle: Computing Foundations",
+                    department="CSCI",
+                    similarity=0.91,
+                    source="CAB",
                 )
             ],
         )
 
+    async def stream_prepared_query(self, prepared: PreparedChatQuery):
+        yield (
+            "event: retrieval\n"
+            "data: "
+            + json.dumps(
+                {
+                    "query": prepared.query,
+                    "retrieved_courses": [course.model_dump() for course in prepared.retrieved_courses],
+                    "retrieval_count": prepared.retrieval_count,
+                }
+            )
+            + "\n\n"
+        )
+        yield 'event: token\ndata: {"delta": "Course "}\n\n'
+        yield 'event: token\ndata: {"delta": "details"}\n\n'
+        yield (
+            "event: done\n"
+            'data: {"response_text": "Course details", "latency_ms": 12, "retrieval_count": 1}\n\n'
+        )
 
-def test_query_endpoint_returns_retrieval_response(monkeypatch) -> None:
-    monkeypatch.setattr(api, "get_service", lambda: _FakeService())
+    async def evaluate(self, query: str, department: str | None = None) -> EvaluateResponse:
+        return EvaluateResponse(
+            query=query,
+            department=department,
+            latency_ms=12,
+            retrieval_count=1,
+            retrieved_courses=[
+                RetrievedCourseSummary(
+                    course_code="CSCI 0111",
+                    title="Computing Foundations",
+                    department="CSCI",
+                    similarity=0.91,
+                    source="CAB",
+                )
+            ],
+            model="gpt-4.1-mini",
+        )
+
+
+def test_query_endpoint_streams_sse_events(monkeypatch) -> None:
+    monkeypatch.setattr(api, "get_chatbot_service", lambda: _FakeChatbotService())
 
     client = TestClient(api.app)
 
-    response = client.post(
-        "/query",
-        json={"query": "csci foundations", "k": 5, "filters": {"source": "cab"}},
-    )
+    with client.stream("POST", "/query", json={"q": "csci foundations", "department": "csci"}) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: retrieval" in body
+    assert "event: token" in body
+    assert "event: done" in body
+    assert '"course_code": "CSCI 0111"' in body
+
+
+def test_evaluate_endpoint_returns_metrics(monkeypatch) -> None:
+    monkeypatch.setattr(api, "get_chatbot_service", lambda: _FakeChatbotService())
+
+    client = TestClient(api.app)
+
+    response = client.post("/evaluate", json={"q": "csci foundations", "department": "csci"})
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["query"] == "csci foundations"
-    assert len(payload["hits"]) == 1
-    assert payload["hits"][0]["doc_id"] == "cab:CSCI 0111:abc"
-    assert payload["hits"][0]["source"] == "cab"
+    assert payload["department"] == "csci"
+    assert payload["latency_ms"] == 12
+    assert payload["retrieval_count"] == 1
+    assert payload["retrieved_courses"][0]["source"] == "CAB"
+    assert payload["model"] == "gpt-4.1-mini"
+
+
+def test_query_endpoint_rejects_whitespace_query(monkeypatch) -> None:
+    monkeypatch.setattr(api, "get_chatbot_service", lambda: _FakeChatbotService())
+
+    client = TestClient(api.app)
+
+    response = client.post("/query", json={"q": "   "})
+
+    assert response.status_code == 422
