@@ -35,6 +35,39 @@ Key output:
 
 - `data/bulletin_courses.json`: one course object per bulletin course.
 
+## RAG Index Build
+
+Build local dense+sparse retrieval indices:
+
+```bash
+python3 -m rag.build_index --persist-dir data
+```
+
+Verbose progress logs:
+
+```bash
+python3 -m rag.build_index --persist-dir data --log-level INFO
+```
+
+Rebuild indices (clears old artifacts first):
+
+```bash
+python3 -m rag.build_index --persist-dir data --rebuild true
+```
+
+Start API:
+
+```bash
+uvicorn app:app --reload
+```
+
+Retrieval endpoint:
+
+- `POST /query` with body:
+  - `query` (string)
+  - `k` (optional int, default 8)
+  - `filters` (optional: `source`, `department`, `instructor_name`)
+
 Run tests:
 
 ```bash
