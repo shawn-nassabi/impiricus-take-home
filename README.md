@@ -97,12 +97,18 @@ Start API:
 uvicorn app:app --reload
 ```
 
-Retrieval endpoint:
+Start Streamlit UI:
+
+```bash
+streamlit run ui/app.py
+```
+
+Chatbot query endpoint:
 
 - `POST /query` with body:
-  - `query` (string)
-  - `k` (optional int, default 8)
-  - `filters` (optional: `source`, `department`, `instructor_name`)
+  - `q` (string)
+  - `department` (optional string)
+- Returns a `text/event-stream` response with `retrieval`, `token`, `done`, and `error` events.
 
 Run tests:
 
