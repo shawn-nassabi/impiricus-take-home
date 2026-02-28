@@ -1,13 +1,16 @@
 from __future__ import annotations
 """FastAPI entrypoint for the LangChain-backed chatbot API."""
 
+import logging
 import os
 from pathlib import Path
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 from chatbot_agent.agent import LangChainAgentRunner
+from chatbot_agent.logging_utils import COLOR_CYAN, format_log
 from chatbot_agent.models import ChatQueryRequest, EvaluateResponse
 from chatbot_agent.retrieval_adapter import ChatbotRetrievalAdapter
 from chatbot_agent.service import ChatbotService
@@ -27,9 +30,35 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 app = FastAPI(title="Impiricus Course Chatbot API", version="0.2.0")
+LOGGER = logging.getLogger(__name__)
 
 _retrieval_service: LocalHybridRetrievalService | None = None
 _chatbot_service: ChatbotService | None = None
+
+
+def _configure_application_logging() -> None:
+    """Route app/package logs through uvicorn's configured handlers."""
+    uvicorn_logger = logging.getLogger("uvicorn.error")
+    target_level = uvicorn_logger.level or logging.INFO
+    handlers = list(uvicorn_logger.handlers)
+
+    if not handlers:
+        fallback_handler = logging.StreamHandler()
+        fallback_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        handlers = [fallback_handler]
+
+    for logger_name in ("app", "chatbot_agent", "rag"):
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(target_level)
+        if not logger.handlers:
+            for handler in handlers:
+                logger.addHandler(handler)
+        logger.propagate = False
+
+
+_configure_application_logging()
 
 
 def get_retrieval_service() -> LocalHybridRetrievalService:
@@ -100,11 +129,22 @@ def health() -> dict[str, str]:
 @app.post("/query")
 async def query(payload: ChatQueryRequest) -> StreamingResponse:
     """Run deterministic retrieval, then stream the chatbot response over SSE."""
+    started_at = time.perf_counter()
     clean_query = _clean_query(payload.q)
     service = get_chatbot_service()
+    clean_department = (payload.department or "").strip().upper() or None
+    LOGGER.info(
+        format_log(
+            "api_request_received",
+            COLOR_CYAN,
+            endpoint="/query",
+            query=clean_query,
+            department=clean_department,
+        )
+    )
 
     try:
-        prepared = service.prepare_query(query=clean_query, department=payload.department)
+        prepared = service.prepare_query(query=clean_query, department=payload.department, started_at=started_at)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -121,10 +161,21 @@ async def query(payload: ChatQueryRequest) -> StreamingResponse:
 @app.post("/evaluate", response_model=EvaluateResponse)
 async def evaluate(payload: ChatQueryRequest) -> EvaluateResponse:
     """Return synchronous timing and retrieval diagnostics."""
+    started_at = time.perf_counter()
     clean_query = _clean_query(payload.q)
     service = get_chatbot_service()
+    clean_department = (payload.department or "").strip().upper() or None
+    LOGGER.info(
+        format_log(
+            "api_request_received",
+            COLOR_CYAN,
+            endpoint="/evaluate",
+            query=clean_query,
+            department=clean_department,
+        )
+    )
 
     try:
-        return await service.evaluate(query=clean_query, department=payload.department)
+        return await service.evaluate(query=clean_query, department=payload.department, started_at=started_at)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

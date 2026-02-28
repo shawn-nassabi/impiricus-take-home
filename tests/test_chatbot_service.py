@@ -16,6 +16,17 @@ class _FakeRetrievalAdapter:
                     "department": "CSCI",
                     "similarity": 0.92,
                     "source": "CAB",
+                    "metadata": {
+                        "source": "cab",
+                        "source_label": "CAB",
+                        "course_code": "CSCI 0111",
+                        "title": "Computing Foundations",
+                        "department": "CSCI",
+                        "instructor_names": ["Ada Lovelace"],
+                        "meetings": ["MWF 10-10:50a"],
+                        "course_url": "https://example.test/csci-0111",
+                        "has_prerequisites": False,
+                    },
                 }
             ],
             "retrieval_count": 1,
@@ -26,8 +37,9 @@ class _FakeRetrievalAdapter:
 class _FakeAgentRunner:
     model_name = "gpt-4.1-mini"
 
-    def __init__(self, fail_on_stream: bool = False) -> None:
+    def __init__(self, fail_on_stream: bool = False, references: list[dict[str, object]] | None = None) -> None:
         self.fail_on_stream = fail_on_stream
+        self.references = references or []
 
     async def stream_answer(self, query: str, department: str | None = None):
         if self.fail_on_stream:
@@ -37,6 +49,9 @@ class _FakeAgentRunner:
 
     async def generate_answer(self, query: str, department: str | None = None) -> str:
         return "Course details"
+
+    def get_last_run_references(self) -> list[dict[str, object]]:
+        return list(self.references)
 
 
 async def _collect(async_iterable) -> list[str]:
@@ -66,6 +81,7 @@ def test_stream_prepared_query_emits_retrieval_then_tokens_then_done() -> None:
     done_payload = _event_payload(events[3])
     assert done_payload["response_text"] == "Course details"
     assert done_payload["retrieval_count"] == 1
+    assert done_payload["retrieved_courses"][0]["course_code"] == "CSCI 0111"
 
 
 def test_stream_prepared_query_emits_error_when_agent_fails() -> None:
@@ -91,3 +107,26 @@ def test_evaluate_returns_latency_and_retrieval_count() -> None:
     assert response.model == "gpt-4.1-mini"
     assert isinstance(response.retrieved_courses[0], RetrievedCourseSummary)
     assert response.latency_ms >= 0
+
+
+def test_stream_done_includes_additional_tool_references() -> None:
+    extra_reference = {
+        "course_code": "ARCH 1773",
+        "title": "Bioarchaeology and Forensic Anthropology",
+        "department": None,
+        "similarity": 0.81,
+        "source": "bulletin",
+        "metadata": {
+            "source": "bulletin",
+            "course_code": "ARCH 1773",
+            "title": "Bioarchaeology and Forensic Anthropology",
+        },
+    }
+    service = ChatbotService(_FakeRetrievalAdapter(), _FakeAgentRunner(references=[extra_reference]))
+    prepared = service.prepare_query(query="anthropology", department="anth")
+
+    events = asyncio.run(_collect(service.stream_prepared_query(prepared)))
+
+    done_payload = _event_payload(events[3])
+    assert done_payload["retrieval_count"] == 2
+    assert {item["course_code"] for item in done_payload["retrieved_courses"]} == {"CSCI 0111", "ARCH 1773"}

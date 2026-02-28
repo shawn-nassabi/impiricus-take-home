@@ -150,16 +150,22 @@ def build_chroma_where(filters: RetrievalFilters | None) -> dict[str, Any]:
     if filters is None:
         return {}
 
-    where: dict[str, Any] = {}
+    clauses: list[dict[str, Any]] = []
 
     if filters.source:
         lowered = filters.source.strip().lower()
         if lowered:
-            where["source"] = lowered
+            clauses.append({"source": lowered})
 
     if filters.department:
         department = filters.department.strip().upper()
         if department:
-            where["department"] = department
+            clauses.append({"department": department})
 
-    return where
+    if not clauses:
+        return {}
+
+    if len(clauses) == 1:
+        return clauses[0]
+
+    return {"$and": clauses}

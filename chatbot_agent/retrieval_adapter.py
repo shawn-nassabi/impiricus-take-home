@@ -16,19 +16,34 @@ class ChatbotRetrievalAdapter:
         self.service = service
         self.default_k = default_k
 
-    def retrieve_all_courses(self, query: str, department: str | None = None) -> dict[str, Any]:
+    def retrieve_all_courses(
+        self,
+        query: str,
+        department: str | None = None,
+        k: int | None = None,
+    ) -> dict[str, Any]:
         """Run the default hybrid search without constraining source."""
-        response = self._search(query=query, department=department)
+        response = self._search(query=query, department=department, k=k)
         return self._payload_from_response(response=response, source_scope="all")
 
-    def retrieve_cab_courses(self, query: str, department: str | None = None) -> dict[str, Any]:
+    def retrieve_cab_courses(
+        self,
+        query: str,
+        department: str | None = None,
+        k: int | None = None,
+    ) -> dict[str, Any]:
         """Retrieve only CAB-backed course documents."""
-        response = self._search(query=query, department=department, source="cab")
+        response = self._search(query=query, department=department, source="cab", k=k)
         return self._payload_from_response(response=response, source_scope="CAB")
 
-    def retrieve_bulletin_courses(self, query: str, department: str | None = None) -> dict[str, Any]:
+    def retrieve_bulletin_courses(
+        self,
+        query: str,
+        department: str | None = None,
+        k: int | None = None,
+    ) -> dict[str, Any]:
         """Retrieve only bulletin-backed course documents."""
-        response = self._search(query=query, department=department, source="bulletin")
+        response = self._search(query=query, department=department, source="bulletin", k=k)
         return self._payload_from_response(response=response, source_scope="bulletin")
 
     def _search(
@@ -36,12 +51,14 @@ class ChatbotRetrievalAdapter:
         query: str,
         department: str | None = None,
         source: str | None = None,
+        k: int | None = None,
     ) -> RetrievalResponse:
         """Translate the chatbot API contract into the retrieval contract."""
         clean_query = query.strip()
         clean_department = (department or "").strip().upper() or None
+        resolved_k = self._resolve_k(k)
         filters = RetrievalFilters(source=source, department=clean_department, instructor_name=None)
-        request = RetrievalRequest(query=clean_query, k=self.default_k, filters=filters)
+        request = RetrievalRequest(query=clean_query, k=resolved_k, filters=filters)
         return self.service.search(request)
 
     def _payload_from_response(self, response: RetrievalResponse, source_scope: str) -> dict[str, Any]:
@@ -54,10 +71,16 @@ class ChatbotRetrievalAdapter:
             "source_scope": source_scope,
         }
 
+    def _resolve_k(self, k: int | None) -> int:
+        """Clamp caller-provided k to a safe range for the chatbot."""
+        if k is None:
+            return self.default_k
+        return max(1, min(int(k), 20))
+
 
 def summarize_hit(hit: RetrievalHit) -> RetrievedCourseSummary:
     """Flatten the fields that the chatbot API exposes publicly."""
-    metadata = hit.metadata
+    metadata = dict(hit.metadata)
     raw_source = metadata.get("source_label") or metadata.get("source") or hit.source
     source_text = str(raw_source or "")
     if source_text.lower() == "cab":
@@ -70,4 +93,5 @@ def summarize_hit(hit: RetrievalHit) -> RetrievedCourseSummary:
         department=str(department) if department else None,
         similarity=float(hit.score),
         source=source_text,
+        metadata=metadata,
     )

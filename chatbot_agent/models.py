@@ -19,6 +19,7 @@ class RetrievedCourseSummary(BaseModel):
     department: str | None = None
     similarity: float
     source: str
+    metadata: dict[str, object]
 
 
 class EvaluateResponse(BaseModel):

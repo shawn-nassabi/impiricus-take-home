@@ -47,6 +47,8 @@ def test_retrieve_cab_courses_applies_source_and_department_filters() -> None:
     assert payload["retrieval_count"] == 1
     assert payload["retrieved_courses"][0]["source"] == "CAB"
     assert payload["retrieved_courses"][0]["similarity"] == 0.88
+    assert payload["retrieved_courses"][0]["metadata"]["department"] == "CSCI"
+    assert payload["retrieved_courses"][0]["metadata"]["source_label"] == "CAB"
 
 
 def test_retrieve_bulletin_courses_uses_bulletin_source_scope() -> None:
@@ -59,3 +61,13 @@ def test_retrieve_bulletin_courses_uses_bulletin_source_scope() -> None:
     assert request.filters is not None
     assert request.filters.source == "bulletin"
     assert payload["source_scope"] == "bulletin"
+
+
+def test_retrieve_all_courses_allows_k_override_with_clamp() -> None:
+    service = _RecordingRetrievalService()
+    adapter = ChatbotRetrievalAdapter(service)
+
+    adapter.retrieve_all_courses(query="history", department=None, k=25)
+
+    request = service.requests[-1]
+    assert request.k == 20

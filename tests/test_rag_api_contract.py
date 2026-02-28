@@ -26,6 +26,17 @@ class _FakeChatbotService:
                     department="CSCI",
                     similarity=0.91,
                     source="CAB",
+                    metadata={
+                        "source": "cab",
+                        "source_label": "CAB",
+                        "course_code": "CSCI 0111",
+                        "title": "Computing Foundations",
+                        "department": "CSCI",
+                        "instructor_names": ["Ada Lovelace"],
+                        "meetings": ["MWF 10-10:50a"],
+                        "course_url": "https://example.test/csci-0111",
+                        "has_prerequisites": False,
+                    },
                 )
             ],
         )
@@ -63,6 +74,17 @@ class _FakeChatbotService:
                     department="CSCI",
                     similarity=0.91,
                     source="CAB",
+                    metadata={
+                        "source": "cab",
+                        "source_label": "CAB",
+                        "course_code": "CSCI 0111",
+                        "title": "Computing Foundations",
+                        "department": "CSCI",
+                        "instructor_names": ["Ada Lovelace"],
+                        "meetings": ["MWF 10-10:50a"],
+                        "course_url": "https://example.test/csci-0111",
+                        "has_prerequisites": False,
+                    },
                 )
             ],
             model="gpt-4.1-mini",
@@ -83,6 +105,7 @@ def test_query_endpoint_streams_sse_events(monkeypatch) -> None:
     assert "event: token" in body
     assert "event: done" in body
     assert '"course_code": "CSCI 0111"' in body
+    assert '"metadata": {"source": "cab"' in body
 
 
 def test_evaluate_endpoint_returns_metrics(monkeypatch) -> None:
@@ -99,6 +122,7 @@ def test_evaluate_endpoint_returns_metrics(monkeypatch) -> None:
     assert payload["latency_ms"] == 12
     assert payload["retrieval_count"] == 1
     assert payload["retrieved_courses"][0]["source"] == "CAB"
+    assert payload["retrieved_courses"][0]["metadata"]["instructor_names"] == ["Ada Lovelace"]
     assert payload["model"] == "gpt-4.1-mini"
 
 
