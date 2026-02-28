@@ -39,12 +39,13 @@ def test_tool_specs_pass_k_override_to_adapter() -> None:
     tokens = activate_tool_call_budget(4)
     try:
         payload = cab_tool.handler(query="foundations", department="CSCI", k=12)
+        refs = get_recorded_tool_references()
     finally:
         reset_tool_call_budget(tokens)
 
     assert payload["requested_k"] == 12
     assert payload["retrieval_count"] == 1
-    assert get_recorded_tool_references()[0]["course_code"] == "CSCI 0111"
+    assert refs[0]["course_code"] == "CSCI 0111"
 
 
 def test_tool_specs_enforce_per_request_call_limit() -> None:
@@ -82,6 +83,7 @@ def test_tool_specs_ignore_inferred_department_without_explicit_request_filter()
 def test_tool_specs_preserve_explicit_request_department_filter() -> None:
     class _RecordingRetrievalAdapter(_FakeRetrievalAdapter):
         def __init__(self) -> None:
+            super().__init__()
             self.departments: list[str | None] = []
 
         def retrieve_cab_courses(self, query: str, department: str | None = None, k: int | None = None):

@@ -371,6 +371,7 @@ def _ordered_metadata_keys(course: dict[str, object]) -> list[str]:
         "department",
         "source",
         "similarity",
+        "prerequisites",
         "score",
         "raw_score",
         "course_level",
@@ -409,6 +410,23 @@ def _metadata_entries(course: dict[str, object]) -> list[tuple[str, object]]:
             continue
 
         entries[key] = value
+
+    has_prerequisites = entries.pop("has_prerequisites", None)
+    prerequisite_text = entries.get("prerequisites")
+
+    if isinstance(prerequisite_text, str):
+        prerequisite_text = prerequisite_text.strip()
+        if prerequisite_text:
+            entries["prerequisites"] = prerequisite_text
+        else:
+            entries.pop("prerequisites", None)
+            prerequisite_text = None
+
+    if prerequisite_text in (None, "") and has_prerequisites is not None:
+        if bool(has_prerequisites):
+            entries["prerequisites"] = "Prerequisites listed, but the backend did not include the text."
+        else:
+            entries["prerequisites"] = "No prerequisites listed."
 
     return list(entries.items())
 

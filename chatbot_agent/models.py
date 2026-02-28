@@ -19,7 +19,11 @@ class RetrievedCourseSummary(BaseModel):
     department: str | None = None
     similarity: float
     source: str
-    metadata: dict[str, object]
+    description: str | None = None
+    meetings: list[str] = Field(default_factory=list)
+    instructors: list[str] = Field(default_factory=list)
+    prerequisites: str | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class EvaluateResponse(BaseModel):

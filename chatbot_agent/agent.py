@@ -15,24 +15,55 @@ from chatbot_agent.tools import (
 )
 
 DEFAULT_CHAT_MODEL = "gpt-4.1-mini"
-MAX_AGENT_TOOL_CALLS = 4
-DEFAULT_SYSTEM_PROMPT = (
-    "You are a Brown University course assistant. Use the available retrieval "
-    "tools before answering factual questions about courses. Your answer must "
-    "stay grounded in the retrieved references returned by the tools. Do not "
-    "invent facts that are not supported by retrieved references. Prefer the "
-    "CAB tool for meeting times, instructors, sections, and scheduling details. "
-    "Prefer the bulletin tool for catalog descriptions and general summaries. "
-    "If the initial references are not sufficient, you may call a retrieval tool "
-    "again with a refined query or a larger k to gather more references. You may "
-    "make up to 4 total tool calls. If the tools still do not provide enough "
-    "evidence, say that clearly. Only apply a department filter when the user "
-    "explicitly supplied one in the request. Do not infer a department filter "
-    "from subject words in the query text. If CAB and bulletin conflict, prefer "
-    "CAB for operational details and mention the discrepancy. When answering, "
-    "reference the retrieved courses directly and keep the response tied to "
-    "those results."
-)
+MAX_AGENT_TOOL_CALLS = 8
+AGENT_RECURSION_LIMIT = 25
+DEFAULT_SYSTEM_PROMPT = """\
+You are a Brown University course assistant with access to retrieval tools. \
+Your answers must be grounded in retrieved data. Do not invent facts.
+
+## Tool Selection
+
+Pick the right tool for the question type:
+
+- **get_course_by_code**: When the user asks about a specific course by code \
+(e.g. "Tell me about CSCI 0320"). Returns full details including description, \
+meetings, and instructors.
+- **search_courses_by_schedule**: When the user asks about courses on specific \
+days or times (e.g. "Friday courses after 3 PM about machine learning"). \
+Pass the topic as `query`, and use `day`, `after_time`, `before_time` to filter. \
+Day codes: M=Monday, T=Tuesday, W=Wednesday, Th=Thursday, F=Friday.
+- **find_similar_courses**: When the user asks for courses similar to a known \
+course, or wants to cross-reference between CAB and bulletin. Pass the course \
+code and optionally a `target_source` to search in.
+- **search_cab_courses**: General semantic search over CAB data. Prefer for \
+meeting times, instructors, sections, and operational details.
+- **search_bulletin_courses**: General semantic search over bulletin data. \
+Prefer for catalog descriptions and general summaries.
+
+## Query Decomposition
+
+For complex questions, break them into steps:
+1. "Find a bulletin course similar to CSCI 0320 from CAB" -> first call \
+get_course_by_code to understand CSCI 0320, then call find_similar_courses \
+with target_source="bulletin".
+2. "List CAB courses about machine learning on Fridays after 3 PM" -> call \
+search_courses_by_schedule with query="machine learning", day="F", \
+after_time="3 PM", source="cab".
+3. "Compare CSCI 0111 across CAB and bulletin" -> call get_course_by_code \
+for the CAB version, then get_course_by_code for the bulletin version.
+
+## Rules
+
+- You may make up to {tool_limit} tool calls per request.
+- Once you have sufficient evidence, stop calling tools and answer immediately. \
+Do not repeat the same search.
+- Only apply a department filter when the user explicitly included one.
+- Do not infer a department filter from subject words.
+- If CAB and bulletin conflict, prefer CAB for operational details and note \
+the discrepancy.
+- If tools do not provide enough evidence, say so clearly.
+- Reference retrieved courses directly and keep your response tied to those results.
+""".format(tool_limit=MAX_AGENT_TOOL_CALLS)
 LOGGER = logging.getLogger(__name__)
 
 
@@ -97,10 +128,13 @@ class LangChainAgentRunner:
         budget_tokens = activate_tool_call_budget(MAX_AGENT_TOOL_CALLS, request_department=department)
         self._last_run_references = []
 
+        agent_config = {"recursion_limit": AGENT_RECURSION_LIMIT}
         try:
             if hasattr(agent, "astream"):
                 try:
-                    async for item in agent.astream(payload, stream_mode="messages"):
+                    async for item in agent.astream(
+                        payload, stream_mode="messages", config=agent_config
+                    ):
                         token = _extract_stream_event_text(item)
                         if not token:
                             continue
@@ -138,20 +172,21 @@ class LangChainAgentRunner:
         if department:
             lines.append(f"Department filter: {department.strip().upper()}")
         lines.append(
-            "Use retrieval tools before answering factual course questions. Stay grounded in "
-            "retrieved references. If the first search is too thin, you may retrieve again "
-            "with a refined query or a larger k, but use at most 4 tool calls total. "
-            "Do not apply a department filter unless the request explicitly included one."
+            f"Use retrieval tools before answering factual course questions. Stay grounded in "
+            f"retrieved references. You may make up to {MAX_AGENT_TOOL_CALLS} tool calls total. "
+            f"Once you have enough evidence, stop calling tools and answer. "
+            f"Do not apply a department filter unless the request explicitly included one."
         )
         return {"messages": [{"role": "user", "content": "\n".join(lines)}]}
 
     async def _invoke_agent(self, agent: Any, payload: dict[str, Any], mode: str) -> str:
         """Invoke the agent once and normalize the returned answer text."""
         del mode
+        agent_config = {"recursion_limit": AGENT_RECURSION_LIMIT}
         if hasattr(agent, "ainvoke"):
-            response = await agent.ainvoke(payload)
+            response = await agent.ainvoke(payload, config=agent_config)
         elif hasattr(agent, "invoke"):
-            response = agent.invoke(payload)
+            response = agent.invoke(payload, config=agent_config)
         else:
             raise RuntimeError("Configured agent does not support invocation.")
 

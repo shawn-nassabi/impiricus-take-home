@@ -19,10 +19,54 @@ _REQUEST_DEPARTMENT: ContextVar[str | None] = ContextVar("chatbot_request_depart
 
 
 class CourseSearchToolInput(BaseModel):
-    """Input schema shared by the retrieval tools."""
+    """Input schema shared by the semantic retrieval tools."""
 
     query: str = Field(min_length=1)
     department: str | None = None
+    k: int | None = Field(default=None, ge=1, le=20)
+
+
+class CourseCodeLookupInput(BaseModel):
+    """Input schema for direct course code lookup."""
+
+    course_code: str = Field(min_length=1)
+    source: str | None = Field(
+        default=None,
+        description='Optional source filter: "cab" or "bulletin".',
+    )
+
+
+class ScheduleSearchInput(BaseModel):
+    """Input schema for schedule-filtered course search."""
+
+    query: str = Field(min_length=1)
+    day: str | None = Field(
+        default=None,
+        description="Day filter using codes: M, T, W, Th, F, or combos like MWF, TTh.",
+    )
+    after_time: str | None = Field(
+        default=None,
+        description='Minimum start time, e.g. "3 PM" or "15:00".',
+    )
+    before_time: str | None = Field(
+        default=None,
+        description='Maximum start time, e.g. "5 PM" or "17:00".',
+    )
+    source: str | None = Field(
+        default=None,
+        description='Optional source filter: "cab" or "bulletin".',
+    )
+    k: int | None = Field(default=None, ge=1, le=20)
+
+
+class SimilarCourseInput(BaseModel):
+    """Input schema for finding courses similar to a given one."""
+
+    course_code: str = Field(min_length=1)
+    target_source: str | None = Field(
+        default=None,
+        description='Source to search in for similar courses: "cab" or "bulletin".',
+    )
     k: int | None = Field(default=None, ge=1, le=20)
 
 
@@ -118,24 +162,151 @@ def build_tool_specs(adapter: ChatbotRetrievalAdapter) -> list[ToolSpec]:
         )
         return payload
 
+    def get_course_by_code(course_code: str, source: str | None = None) -> dict[str, Any]:
+        """Look up a specific course by its exact course code."""
+        allowed, call_number, call_limit = consume_tool_call("get_course_by_code")
+        if not allowed:
+            LOGGER.info(
+                format_log("agent_tool_limit_reached", COLOR_YELLOW,
+                           tool="get_course_by_code", attempted_call=call_number, limit=call_limit)
+            )
+            return _tool_limit_payload("all", call_limit)
+        LOGGER.info(
+            format_log("agent_tool_start", COLOR_BLUE,
+                       tool="get_course_by_code", call=call_number, limit=call_limit,
+                       course_code=course_code, source=source)
+        )
+        payload = adapter.lookup_course_by_code(course_code=course_code, source=source)
+        _record_tool_references(payload)
+        LOGGER.info(
+            format_log("agent_tool_done", COLOR_BLUE,
+                       tool="get_course_by_code", call=call_number,
+                       retrieval_count=payload.get("retrieval_count", 0))
+        )
+        return payload
+
+    def search_courses_by_schedule(
+        query: str,
+        day: str | None = None,
+        after_time: str | None = None,
+        before_time: str | None = None,
+        source: str | None = None,
+        k: int | None = None,
+    ) -> dict[str, Any]:
+        """Search courses by topic and filter by meeting day/time."""
+        allowed, call_number, call_limit = consume_tool_call("search_courses_by_schedule")
+        if not allowed:
+            LOGGER.info(
+                format_log("agent_tool_limit_reached", COLOR_YELLOW,
+                           tool="search_courses_by_schedule", attempted_call=call_number, limit=call_limit)
+            )
+            return _tool_limit_payload(source or "all", call_limit)
+        effective_department = _resolve_effective_department(None)
+        LOGGER.info(
+            format_log("agent_tool_start", COLOR_BLUE,
+                       tool="search_courses_by_schedule", call=call_number, limit=call_limit,
+                       query=query, day=day, after_time=after_time, before_time=before_time,
+                       source=source, k=k)
+        )
+        payload = adapter.search_by_schedule(
+            query=query, day=day, after_time=after_time, before_time=before_time,
+            source=source, department=effective_department, k=k,
+        )
+        _record_tool_references(payload)
+        LOGGER.info(
+            format_log("agent_tool_done", COLOR_BLUE,
+                       tool="search_courses_by_schedule", call=call_number,
+                       retrieval_count=payload.get("retrieval_count", 0))
+        )
+        return payload
+
+    def find_similar_courses(
+        course_code: str,
+        target_source: str | None = None,
+        k: int | None = None,
+    ) -> dict[str, Any]:
+        """Find courses semantically similar to a given course, optionally in a different source."""
+        allowed, call_number, call_limit = consume_tool_call("find_similar_courses")
+        if not allowed:
+            LOGGER.info(
+                format_log("agent_tool_limit_reached", COLOR_YELLOW,
+                           tool="find_similar_courses", attempted_call=call_number, limit=call_limit)
+            )
+            return _tool_limit_payload(target_source or "all", call_limit)
+        LOGGER.info(
+            format_log("agent_tool_start", COLOR_BLUE,
+                       tool="find_similar_courses", call=call_number, limit=call_limit,
+                       course_code=course_code, target_source=target_source, k=k)
+        )
+        payload = adapter.find_similar_courses(
+            course_code=course_code, target_source=target_source, k=k,
+        )
+        _record_tool_references(payload)
+        LOGGER.info(
+            format_log("agent_tool_done", COLOR_BLUE,
+                       tool="find_similar_courses", call=call_number,
+                       retrieval_count=payload.get("retrieval_count", 0))
+        )
+        return payload
+
     return [
         ToolSpec(
             name="search_cab_courses",
             description=(
-                "Retrieve course records from CAB only. Prefer this for meeting times, "
-                "sections, instructors, and operational course details."
+                "Semantic search over CAB course records. Returns meeting times, "
+                "sections, instructors, and operational details. Use for general "
+                "topic searches when you need CAB data."
             ),
             handler=search_cab_courses,
         ),
         ToolSpec(
             name="search_bulletin_courses",
             description=(
-                "Retrieve course records from the bulletin only. Prefer this for "
-                "catalog descriptions and general course summaries."
+                "Semantic search over bulletin course records. Returns catalog "
+                "descriptions and general course summaries. Use for general topic "
+                "searches when you need bulletin data."
             ),
             handler=search_bulletin_courses,
         ),
+        ToolSpec(
+            name="get_course_by_code",
+            description=(
+                "Look up a specific course by its exact course code (e.g. 'CSCI 0320'). "
+                "Returns full details including description, meetings, and instructors. "
+                "Use when the user asks about a specific known course."
+            ),
+            handler=get_course_by_code,
+        ),
+        ToolSpec(
+            name="search_courses_by_schedule",
+            description=(
+                "Search for courses by topic AND filter by meeting schedule. "
+                "Supports filtering by day (M/T/W/Th/F), start time (after_time, "
+                "before_time). Use when the user asks about courses on specific "
+                "days or at specific times."
+            ),
+            handler=search_courses_by_schedule,
+        ),
+        ToolSpec(
+            name="find_similar_courses",
+            description=(
+                "Find courses that are semantically similar to a given course code. "
+                "Optionally restrict results to a specific source (cab or bulletin). "
+                "Use when the user asks to find courses similar to or related to "
+                "a specific course, or to cross-reference between CAB and bulletin."
+            ),
+            handler=find_similar_courses,
+        ),
     ]
+
+
+_TOOL_SCHEMA_MAP: dict[str, type[BaseModel]] = {
+    "search_cab_courses": CourseSearchToolInput,
+    "search_bulletin_courses": CourseSearchToolInput,
+    "get_course_by_code": CourseCodeLookupInput,
+    "search_courses_by_schedule": ScheduleSearchInput,
+    "find_similar_courses": SimilarCourseInput,
+}
 
 
 def build_langchain_tools(adapter: ChatbotRetrievalAdapter) -> list[Any]:
@@ -149,12 +320,13 @@ def build_langchain_tools(adapter: ChatbotRetrievalAdapter) -> list[Any]:
 
     tools: list[Any] = []
     for spec in build_tool_specs(adapter):
+        schema = _TOOL_SCHEMA_MAP.get(spec.name, CourseSearchToolInput)
         tools.append(
             StructuredTool.from_function(
                 func=spec.handler,
                 name=spec.name,
                 description=spec.description,
-                args_schema=CourseSearchToolInput,
+                args_schema=schema,
             )
         )
     return tools
