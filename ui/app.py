@@ -633,29 +633,34 @@ def main() -> None:
     _render_sidebar()
     _render_header()
 
-    st.markdown(
-        """
-        <div class="filter-shell">
-            <strong>Department filter</strong>
-            <span>Leave this blank to search across all departments, or enter a code like CSCI to narrow the results.</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.text_input(
-        "Department filter",
-        key="department_filter",
-        placeholder="e.g. CSCI",
-        help="Optional. Leave blank to search across all departments.",
-    )
-
     transcript = st.container()
     with transcript:
         _render_history()
 
-    prompt = st.chat_input("Ask about courses, departments, or requirements")
-    if not prompt:
+    st.caption("Type an optional department code in the smaller field on the right to narrow the search.")
+
+    with st.form("query_form", clear_on_submit=True):
+        input_columns = st.columns([4.8, 1.8, 0.9])
+        with input_columns[0]:
+            prompt = st.text_input(
+                "Ask about courses, departments, or requirements",
+                placeholder="Ask about courses, departments, or requirements",
+                label_visibility="collapsed",
+            )
+        with input_columns[1]:
+            department_input = st.text_input(
+                "Department filter",
+                value=st.session_state.department_filter,
+                placeholder="Type here, e.g. CSCI",
+                help="Optional. Type a department code like CSCI to narrow results.",
+            )
+        with input_columns[2]:
+            submitted = st.form_submit_button("Send", use_container_width=True)
+
+    if not submitted:
         return
+
+    st.session_state.department_filter = department_input.strip()
 
     query = prompt.strip()
     if not query:
