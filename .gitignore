@@ -4,3 +4,5 @@ __pycache__/
 data/chroma
 data/sparse_index
 venv/
+.env
+.*env
