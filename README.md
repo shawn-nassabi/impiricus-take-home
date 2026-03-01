@@ -176,7 +176,7 @@ Use these in the Streamlit UI or as the `q` field for `POST /query`:
 
 1. `Who teaches APMA2680, and when does the class meet?`
 2. `I am interested in Philosophy courses related to metaphysics. Which ones do you recommend?`
-3. `Find a Brown Bulletin course similar to CSCI0320 from CAB.`
+3. `Find a Brown Bulletin course similar to CSCI 0320 from CAB.`
 4. `List all CAB courses taught on Fridays after 3 pm related to "machine learning."`
 
 ## Design Decisions and Tradeoffs
@@ -228,9 +228,7 @@ Example record:
   "prerequisites": "Intro statistics.",
   "department": "DATA",
   "meetings": ["TTh 3:00-4:20 PM"],
-  "instructor": [
-    { "name": "Jordan Lee" }
-  ],
+  "instructor": [{ "name": "Jordan Lee" }],
   "course_url": "https://example.edu/courses/data-1010"
 }
 ```
