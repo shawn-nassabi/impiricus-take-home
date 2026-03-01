@@ -115,13 +115,22 @@ class ChatbotRetrievalAdapter:
         department: str | None = None,
         k: int | None = None,
     ) -> dict[str, Any]:
-        """Semantic search followed by meeting-time filtering."""
-        wide_k = max(self._resolve_k(k) * 3, 30)
+        """Two-pass retrieval combining semantic search and corpus scan.
+
+        Pass 1 -- hybrid search with a wide candidate pool, then schedule
+        filter.  Pass 2 -- BM25 scoring across the *full* corpus with
+        schedule pre-filtering (catches courses missed by the semantic
+        truncation).  Results are merged and deduplicated.
+        """
+        desired_k = self._resolve_k(k)
+        seen_doc_ids: set[str] = set()
+        merged: list[RetrievedCourseSummary] = []
+
+        # --- Pass 1: semantic search + schedule filter ---
+        wide_k = max(desired_k * 5, 50)
         response = self._search(
             query=query, department=department, source=source, k=wide_k,
         )
-
-        filtered: list[RetrievedCourseSummary] = []
         for hit in response.hits:
             summary = summarize_hit(hit)
             if not summary.meetings:
@@ -129,15 +138,33 @@ class ChatbotRetrievalAdapter:
             if matches_schedule_filter(
                 summary.meetings, day=day, after_time=after_time, before_time=before_time,
             ):
-                filtered.append(summary)
+                merged.append(summary)
+                seen_doc_ids.add(hit.doc_id)
 
-        desired_k = self._resolve_k(k)
-        filtered = filtered[:desired_k]
+        # --- Pass 2: corpus-scan fallback via BM25 ---
+        if hasattr(self.service, "score_all_by_keyword"):
+            clean_dept = (department or "").strip().upper() or None
+            scored_docs = self.service.score_all_by_keyword(
+                query=query, source=source, department=clean_dept,
+            )
+            for doc, bm25_score in scored_docs:
+                if doc.doc_id in seen_doc_ids:
+                    continue
+                if not doc.meetings:
+                    continue
+                if not matches_schedule_filter(
+                    doc.meetings, day=day, after_time=after_time, before_time=before_time,
+                ):
+                    continue
+                merged.append(summarize_canonical_doc(doc))
+                seen_doc_ids.add(doc.doc_id)
+
+        merged = merged[:desired_k]
 
         return {
             "query": query,
-            "retrieved_courses": [s.model_dump() for s in filtered],
-            "retrieval_count": len(filtered),
+            "retrieved_courses": [s.model_dump() for s in merged],
+            "retrieval_count": len(merged),
             "source_scope": source or "all",
             "schedule_filter": {
                 "day": day,

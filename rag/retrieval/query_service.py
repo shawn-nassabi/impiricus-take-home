@@ -8,7 +8,7 @@ from typing import Any
 from rag.indexing.embeddings import EmbeddingBackend, build_embedding_backend
 from rag.retrieval.hybrid_retriever import HybridRetriever
 from rag.models import CanonicalCourseDocument, RetrievalRequest, RetrievalResponse
-from rag.retrieval.sparse_index import SparseKeywordIndex
+from rag.retrieval.sparse_index import SparseKeywordIndex, tokenize
 from rag.indexing.vector_store import ChromaVectorStore, DEFAULT_COLLECTION_NAME
 
 _CODE_NORMALIZE_RE = re.compile(r"\s+")
@@ -85,3 +85,35 @@ class LocalHybridRetrievalService:
     def get_all_documents(self) -> list[CanonicalCourseDocument]:
         """Expose the full document list for iteration-based tools."""
         return self.retriever.sparse_index.documents
+
+    def score_all_by_keyword(
+        self,
+        query: str,
+        source: str | None = None,
+        department: str | None = None,
+    ) -> list[tuple[CanonicalCourseDocument, float]]:
+        """Return all documents scored by BM25 relevance, filtered by source/department.
+
+        Unlike ``search()``, this method does not truncate the candidate list,
+        allowing callers to apply their own post-filters (e.g. schedule
+        constraints) on the full corpus before ranking.
+        """
+        sparse = self.retriever.sparse_index
+        query_tokens = tokenize(query)
+        if not query_tokens:
+            return []
+
+        scores = sparse._bm25.get_scores(query_tokens)
+        results: list[tuple[CanonicalCourseDocument, float]] = []
+        for idx, score in enumerate(scores):
+            doc = sparse.documents[idx]
+            if source and doc.source != source.strip().lower():
+                continue
+            if department and (doc.department or "").upper() != department.strip().upper():
+                continue
+            if float(score) <= 0:
+                continue
+            results.append((doc, float(score)))
+
+        results.sort(key=lambda pair: pair[1], reverse=True)
+        return results

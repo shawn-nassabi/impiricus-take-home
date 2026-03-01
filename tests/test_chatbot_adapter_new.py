@@ -36,14 +36,20 @@ def _make_doc(
 
 
 class _FakeService:
-    """Minimal service fake with lookup_by_code and search."""
+    """Minimal service fake with lookup_by_code, search, and score_all_by_keyword."""
 
-    def __init__(self, docs: list[CanonicalCourseDocument]) -> None:
+    def __init__(
+        self,
+        docs: list[CanonicalCourseDocument],
+        *,
+        search_returns: list[CanonicalCourseDocument] | None = None,
+    ) -> None:
         self._docs = docs
+        self._search_docs = search_returns if search_returns is not None else docs
 
     def search(self, request: RetrievalRequest) -> RetrievalResponse:
         hits: list[RetrievalHit] = []
-        for doc in self._docs:
+        for doc in self._search_docs:
             if request.filters and request.filters.source:
                 if doc.source != request.filters.source.strip().lower():
                     continue
@@ -71,6 +77,23 @@ class _FakeService:
             if source and doc.source != source.strip().lower():
                 continue
             results.append(doc)
+        return results
+
+    def score_all_by_keyword(
+        self,
+        query: str,
+        source: str | None = None,
+        department: str | None = None,
+    ) -> list[tuple[CanonicalCourseDocument, float]]:
+        results = []
+        for doc in self._docs:
+            if source and doc.source != source.strip().lower():
+                continue
+            if department and (doc.department or "").upper() != department.strip().upper():
+                continue
+            score = 1.0 if query.lower() in doc.text.lower() else 0.1
+            results.append((doc, score))
+        results.sort(key=lambda p: p[1], reverse=True)
         return results
 
 
@@ -221,6 +244,64 @@ class TestNormalizeCourseCode:
     def test_already_normalized(self) -> None:
         from rag.retrieval.query_service import normalize_course_code
         assert normalize_course_code("AFRI 1050E") == "AFRI 1050E"
+
+
+class TestSearchByScheduleTwoPass:
+    """Verify that the corpus-scan pass catches courses missed by semantic search."""
+
+    def test_corpus_scan_finds_schedule_match_missed_by_semantic(self) -> None:
+        """A course only in the full corpus (not in semantic results) should
+        still appear when it matches the schedule filter."""
+        semantic_hit = _make_doc(
+            course_code="CSCI 1420",
+            title="Machine Learning",
+            meetings=["TTh 2:30pm-3:50pm"],
+        )
+        corpus_only = _make_doc(
+            course_code="CSCI 0410",
+            title="Foundations of AI and Machine Learning",
+            meetings=["202510 | Section L03 | F 3-3:50p | E. Ewing"],
+        )
+        service = _FakeService(
+            docs=[semantic_hit, corpus_only],
+            search_returns=[semantic_hit],
+        )
+        adapter = ChatbotRetrievalAdapter(service)
+
+        result = adapter.search_by_schedule(
+            query="machine learning", day="F", after_time="3 PM", source="cab",
+        )
+        codes = [c["course_code"] for c in result["retrieved_courses"]]
+        assert "CSCI 0410" in codes
+
+    def test_no_duplicates_across_passes(self) -> None:
+        """A course found in both semantic and corpus passes should only appear once."""
+        doc = _make_doc(
+            course_code="CSCI 0111",
+            meetings=["F 3pm-5:30pm"],
+        )
+        service = _FakeService(docs=[doc])
+        adapter = ChatbotRetrievalAdapter(service)
+
+        result = adapter.search_by_schedule(query="cs", day="F", after_time="3 PM")
+        assert result["retrieval_count"] == 1
+
+    def test_pipe_delimited_meetings_parsed_in_corpus_scan(self) -> None:
+        """Pipe-delimited meeting strings should be parseable for schedule filtering."""
+        doc = _make_doc(
+            course_code="APMA 1931B",
+            title="Foundations of Machine Learning",
+            meetings=[
+                "202510 | Section S01 | M 3-5:30p | Y. Sohn",
+                "M 3pm-5:30pm",
+            ],
+        )
+        service = _FakeService(docs=[doc], search_returns=[])
+        adapter = ChatbotRetrievalAdapter(service)
+
+        result = adapter.search_by_schedule(query="machine learning", day="M", after_time="3 PM")
+        assert result["retrieval_count"] == 1
+        assert result["retrieved_courses"][0]["course_code"] == "APMA 1931B"
 
 
 class TestSummarizeCanonicalDoc:
