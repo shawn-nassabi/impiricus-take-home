@@ -1,0 +1,15 @@
+beautifulsoup4==4.12.3
+chromadb
+fastapi==0.116.1
+langchain
+langchain-openai
+playwright==1.54.0
+pypdf==5.9.0
+python-dotenv
+pytest==8.4.1
+rank-bm25
+rapidfuzz
+requests==2.32.5
+sentence-transformers
+streamlit==1.48.1
+uvicorn==0.35.0

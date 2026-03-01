@@ -1,0 +1,19 @@
+{
+  "started_at": "2026-02-27T18:55:42.323928+00:00",
+  "ended_at": "2026-02-27T18:58:35.910120+00:00",
+  "filters": {
+    "course_scope": "All Courses",
+    "term": "Any Term (2025-26)",
+    "mode_of_instruction": "All Modes of Instruction",
+    "keyword": ""
+  },
+  "counts": {
+    "discovered_urls": 2839,
+    "completed_urls": 2839,
+    "failed_urls": 0,
+    "output_records": 2839
+  },
+  "failed_urls": {},
+  "output_path": "data/cab_courses.json",
+  "checkpoint_path": "data/cab_checkpoint.json"
+}
